@@ -1,0 +1,84 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tidb-operator-release-workshop
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: tidb-operator-release-workshop
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: tidb-operator-release-workshop
+    spec:
+      containers:
+        - image: registry.cn-beijing.aliyuncs.com/handlerww/tidb-operator-release-workshop:latest
+          imagePullPolicy: IfNotPresent
+          name: tidb-operator-release-workshop
+          command:
+            - sleep 3600
+          env:
+            - name: GITHUB_TOKEN
+              value: ""
+            - name: GH_NO_UPDATE_NOTIFIER
+              value: "n"
+            - name: FROM_VERSION
+              value: "v1.1.9"
+            - name: TO_VERSION
+              value: "v1.1.10"
+            - name: FROM_USER
+              value: "handlerww"
+            - name: BASE_BRANCH
+              value: "release-1.1"
+            - name: RELEASE_GH_HOST
+              value: "github.com.cnpmjs.org"
+          volumeMounts:
+            - name: startup-script
+              mountPath: /usr/bin/bootstrap.sh
+              readOnly: true
+      restartPolicy: Always
+      volumes:
+        - name: startup-script
+          configMap:
+            name: tidb-operator-release-workshop
+            defaultMode: 420
+            items:
+              - key: startup-script
+                path: bootstrap.sh
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  labels:
+    app.kubernetes.io/name: tidb-operator-release-workshop
+  name: tidb-operator-release-workshop
+data:
+  startup-script: |
+    gh config set prompt disabled
+
+    gh repo fork pingcap/tidb-operator --clone=false
+    gh repo fork pingcap/docs-tidb-operator --clone=false
+
+    # Set git credential with your github token
+    git config --global credential.https://github.com.helper '!gh auth git-credential'
+    git clone https://github.com.cnpmjs.org/${FROM_USER}/tidb-operator.git /release-data/bump-tidb-operator 
+    git clone https://github.com.cnpmjs.org/${FROM_USER}/docs-tidb-operator.git /release-data/bump-docs
+    git clone https://github.com.cnpmjs.org/${FROM_USER}/docs-tidb-operator.git /release-data/release-notes
+
+    # upload the version in the below
+    cd /release-data/bump-tidb-operator && git checkout -B bump-${TO_VERSION}
+    cd /release-data/bump-docs && git checkout -B bump-${TO_VERSION}
+    cd /release-data/release-notes && git checkout -B release-notes-${TO_VERSION}
+    cd /release-data/release-notes && release-notes --start-rev ${FROM_VERSION} --end-rev ${BASE_BRANCH} --branch ${BASE_BRANCH} --github-org pingcap --github-repo tidb-operator --output note.md --debug --format markdown -requiredAuthor ''
+
+    git clone https://github.com.cnpmjs.org/${FROM_USER}/tidb-operator.git /release-data/tag-tidb-operator 
+    git checkout -b "${BASE_BRANCH}"
+    # When 3 PRs above merged, update the target branch and tag the version 
+    # git pull
+    # git tag -m '${BASE_BRANCH}' ${TO_VERSION}
+
+    # These changes will affetcs github online data
+    # create issues
+    # gh issue create --repo pingcap/tidb-operator --title "Release ${TO_VERSION}" --body "This is an issue tracking the tidb-operator ${TO_VERSION} release.\nPrevious:\nPending PRs:\nTODOs:"
+    tail -f /dev/null
